@@ -15,11 +15,108 @@ A股自选股智能分析系统 - 通知层
    - Pushover（手机/桌面推送）
 """
 import logging
+import os
+import re
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
 from src.config import get_config
+
+# Pre-compiled CJK character pattern for translation detection
+_CJK_PATTERN = re.compile(r'[\u4e00-\u9fff\uac00-\ud7af\u3040-\u309f\u30a0-\u30ff]')
+
+
+def _translate_cjk_to_english(content: str, timeout: int = 15) -> str:
+    """
+    Translate CJK (Chinese/Japanese/Korean) text in content to English
+    using Google Translate free API. Preserves markdown formatting.
+
+    Returns original content if no CJK characters found, or if translation fails.
+    """
+    if not _CJK_PATTERN.search(content):
+        return content  # No CJK, skip translation
+
+    def _do_translate(text: str) -> Optional[str]:
+        """Translate a single text chunk using Google Translate."""
+        try:
+            encoded = urllib.parse.quote(text)
+            url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-CN&tl=en&dt=t&q={encoded}"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read().decode("utf-8")
+                import json
+                parsed = json.loads(data)
+                # Response format: [[translated_text, src_text, 0, 0], None, "zh-CN"]
+                if parsed and parsed[0] and parsed[0][0]:
+                    return parsed[0][0]
+        except Exception as e:
+            logger.warning(f"[Translation] Google Translate failed: {e}")
+        return None
+
+    def _split_blocks(text: str) -> List[Tuple[str, bool]]:
+        """
+        Split markdown content into translatable (contains CJK) and
+        non-translatable (code, URLs, markdown syntax) blocks.
+        Returns list of (block_text, isCJK) tuples.
+        """
+        # Regex to match code blocks (```...```), inline code (`...`),
+        # URLs, and CJK strings
+        code_pattern = re.compile(r'```[\s\S]*?```|`[^`]+`|https?://\S+')
+        cjk_pattern = re.compile(r'[\u4e00-\u9fff\uac00-\ud7af\u3040-\u309f\u30a0-\u30ff]+')
+
+        blocks = []
+        last_end = 0
+
+        for match in code_pattern.finditer(text):
+            # Translate any CJK before this code block
+            before = text[last_end:match.start()]
+            if before:
+                if _CJK_PATTERN.search(before):
+                    blocks.append((before, True))
+                else:
+                    blocks.append((before, False))
+            # Non-CJK code block
+            blocks.append((match.group(), False))
+            last_end = match.end()
+
+        # Translate remaining text after last code block
+        remaining = text[last_end:]
+        if remaining:
+            if _CJK_PATTERN.search(remaining):
+                blocks.append((remaining, True))
+            else:
+                blocks.append((remaining, False))
+
+        return blocks
+
+    try:
+        blocks = _split_blocks(content)
+        translated_parts = []
+
+        for block_text, needs_translation in blocks:
+            if needs_translation:
+                translated = _do_translate(block_text)
+                if translated:
+                    translated_parts.append(translated)
+                else:
+                    # Translation failed, keep original
+                    translated_parts.append(block_text)
+            else:
+                translated_parts.append(block_text)
+
+        result = "".join(translated_parts)
+        logger.info(f"[Translation] Successfully translated {len(content)} chars to English")
+        return result
+
+    except Exception as e:
+        logger.warning(f"[Translation] Translation failed: {e}")
+        return content  # Fallback: return original
 from src.analyzer import AnalysisResult
 from src.enums import ReportType
 from src.report_language import (
@@ -145,6 +242,12 @@ class NotificationService(
 
         # 仅分析结果摘要（Issue #262）：true 时只推送汇总，不含个股详情
         self._report_summary_only = getattr(config, 'report_summary_only', False)
+        # 自动翻译：检测到中文内容时自动翻译为英文（通过 Google Translate 免费接口）
+        # Check both config attribute and TRANSLATE_TO_EN env var (env var takes precedence in GitHub Actions)
+        self._translate_to_en = (
+            getattr(config, 'translate_to_en', False) or
+            os.environ.get('TRANSLATE_TO_EN', '').lower() in ('true', '1', 'yes')
+        )
         self._history_compare_cache: Dict[Tuple[int, Tuple[Tuple[str, str], ...]], Dict[str, List[Dict[str, Any]]]] = {}
 
         # 初始化各渠道
@@ -1580,6 +1683,10 @@ class NotificationService(
         Returns:
             是否至少有一个渠道发送成功
         """
+        # Translation layer: auto-translate CJK to English if enabled
+        if self._translate_to_en:
+            content = _translate_cjk_to_english(content)
+
         context_success = self.send_to_context(content)
 
         if not self._available_channels:
