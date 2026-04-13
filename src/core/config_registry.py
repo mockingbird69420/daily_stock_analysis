@@ -1213,6 +1213,18 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {"enum": ["zh", "en"]},
         "display_order": 56,
     },
+    "TRANSLATE_TO_EN": {
+        "title": "Auto-Translate CJK to English",
+        "description": "Automatically detect and translate CJK (Chinese/Japanese/Korean) content to English via Google Translate free API. Falls back to original text if translation fails.",
+        "category": "notification",
+        "data_type": "boolean",
+        "ui_control": "checkbox",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "false",
+        "display_order": 57,
+    },
     "REPORT_TEMPLATES_DIR": {
         "title": "Report Templates Dir",
         "description": "Directory for Jinja2 report templates (relative to project root).",
