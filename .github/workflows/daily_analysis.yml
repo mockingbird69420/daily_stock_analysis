@@ -1,9 +1,9 @@
-name: 每日股票分析
+name: Daily Stock Analysis
 
 on:
-  # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
+  # 定时触发 - 每天 7AM PDT Mon-Fri (UTC 14:00)
   schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+    - cron: '0 14 * * 1-5'     # Mon-Fri 14:00 UTC = 7AM PDT
   
   # 手动触发
   workflow_dispatch:
