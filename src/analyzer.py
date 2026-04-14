@@ -1008,6 +1008,9 @@ class GeminiAnalyzer:
     ) -> Any:
         """Dispatch a LiteLLM completion through router or direct fallback."""
         effective_kwargs = dict(call_kwargs)
+        # Add timeout to prevent streaming hangs on 529/minimax overload
+        # This ensures hung streams raise an exception that triggers non-stream fallback
+        effective_kwargs["request_timeout"] = 120
         if use_channel_router and self._router and model in router_model_names:
             return self._router.completion(**effective_kwargs)
         if self._router and model == config.litellm_model and not use_channel_router:
